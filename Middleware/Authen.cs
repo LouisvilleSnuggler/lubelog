@@ -58,39 +58,51 @@ namespace CarCareTracker.Middleware
                 }
                 else if (!string.IsNullOrWhiteSpace(request_header))
                 {
-                    var cleanedHeader = request_header.ToString().Replace("Basic ", "").Trim();
-                    byte[] data = Convert.FromBase64String(cleanedHeader);
-                    string decodedString = Encoding.UTF8.GetString(data);
-                    var splitString = decodedString.Split(":");
-                    if (splitString.Count() != 2)
+                    bool useBearerAuth = request_header.ToString().Contains("Bearer");
+                    var cleanedHeader = useBearerAuth ? request_header.ToString().Replace("Bearer ", "").Trim() : request_header.ToString().Replace("Basic ", "").Trim();
+                    var userData = new UserData();
+                    if (useBearerAuth)
                     {
-                        return AuthenticateResult.Fail("Invalid credentials");
-                    }
+                        //validate OpenID User from Bearer token
+                        var jwtResult = _loginLogic.ValidateOAuthToken(cleanedHeader);
+                        if (jwtResult.Success)
+                        {
+                            userData = _loginLogic.ValidateOpenIDUser(new LoginModel { EmailAddress = jwtResult.EmailAddress });
+                        }
+                    } 
                     else
                     {
-                        var userData = _loginLogic.ValidateUserCredentials(new LoginModel { UserName = splitString[0], Password = splitString[1] });
-                        if (userData.Id != default)
+                        //perform basic auth.
+                        byte[] data = Convert.FromBase64String(cleanedHeader);
+                        string decodedString = Encoding.UTF8.GetString(data);
+                        var splitString = decodedString.Split(":");
+                        if (splitString.Count() != 2)
                         {
-                            var appIdentity = new ClaimsIdentity("Custom");
-                            var userIdentity = new List<Claim>
-                            {
-                                new(ClaimTypes.Name, splitString[0]),
-                                new(ClaimTypes.NameIdentifier, userData.Id.ToString()),
-                                new(ClaimTypes.Email, userData.EmailAddress),
-                                new(ClaimTypes.Role, "APIAuth")
-                            };
-                            if (userData.IsAdmin)
-                            {
-                                userIdentity.Add(new(ClaimTypes.Role, nameof(UserData.IsAdmin)));
-                            }
-                            if (userData.IsRootUser)
-                            {
-                                userIdentity.Add(new(ClaimTypes.Role, nameof(UserData.IsRootUser)));
-                            }
-                            appIdentity.AddClaims(userIdentity);
-                            AuthenticationTicket ticket = new AuthenticationTicket(new ClaimsPrincipal(appIdentity), Scheme.Name);
-                            return AuthenticateResult.Success(ticket);
+                            return AuthenticateResult.Fail("Invalid credentials");
                         }
+                        userData = _loginLogic.ValidateUserCredentials(new LoginModel { UserName = splitString[0], Password = splitString[1] });
+                    }
+                    if (userData.Id != default)
+                    {
+                        var appIdentity = new ClaimsIdentity("Custom");
+                        var userIdentity = new List<Claim>
+                        {
+                            new(ClaimTypes.Name, userData.UserName),
+                            new(ClaimTypes.NameIdentifier, userData.Id.ToString()),
+                            new(ClaimTypes.Email, userData.EmailAddress),
+                            new(ClaimTypes.Role, "APIAuth")
+                        };
+                        if (userData.IsAdmin)
+                        {
+                            userIdentity.Add(new(ClaimTypes.Role, nameof(UserData.IsAdmin)));
+                        }
+                        if (userData.IsRootUser)
+                        {
+                            userIdentity.Add(new(ClaimTypes.Role, nameof(UserData.IsRootUser)));
+                        }
+                        appIdentity.AddClaims(userIdentity);
+                        AuthenticationTicket ticket = new AuthenticationTicket(new ClaimsPrincipal(appIdentity), Scheme.Name);
+                        return AuthenticateResult.Success(ticket);
                     }
                 }
                 else if (!string.IsNullOrWhiteSpace(access_token))

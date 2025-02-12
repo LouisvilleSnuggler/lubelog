@@ -4,7 +4,6 @@ using CarCareTracker.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
-using System.IdentityModel.Tokens.Jwt;
 using System.Text.Json;
 
 namespace CarCareTracker.Controllers
@@ -134,12 +133,10 @@ namespace CarCareTracker.Controllers
                     if (!string.IsNullOrWhiteSpace(userJwt))
                     {
                         //validate JWT token
-                        var tokenParser = new JwtSecurityTokenHandler();
-                        var parsedToken = tokenParser.ReadJwtToken(userJwt);
-                        var userEmailAddress = parsedToken.Claims.First(x => x.Type == "email").Value;
-                        if (!string.IsNullOrWhiteSpace(userEmailAddress))
+                        var jwtResult = _loginLogic.ValidateOAuthToken(userJwt);
+                        if (jwtResult.Success && !string.IsNullOrWhiteSpace(jwtResult.EmailAddress))
                         {
-                            var userData = _loginLogic.ValidateOpenIDUser(new LoginModel() { EmailAddress = userEmailAddress });
+                            var userData = _loginLogic.ValidateOpenIDUser(new LoginModel { EmailAddress = jwtResult.EmailAddress });
                             if (userData.Id != default)
                             {
                                 AuthCookie authCookie = new AuthCookie
@@ -153,12 +150,15 @@ namespace CarCareTracker.Controllers
                                 return new RedirectResult("/Home");
                             } else
                             {
-                                _logger.LogInformation($"User {userEmailAddress} tried to login via OpenID but is not a registered user in LubeLogger.");
-                                return View("OpenIDRegistration", model: userEmailAddress);
+                                _logger.LogInformation($"User {jwtResult.EmailAddress} tried to login via OpenID but is not a registered user in LubeLogger.");
+                                return View("OpenIDRegistration", model: jwtResult.EmailAddress);
                             }
-                        } else
+                        } else if (jwtResult.Success)
                         {
                             _logger.LogInformation("OpenID Provider did not provide a valid email address for the user");
+                        } else
+                        {
+                            _logger.LogError("OpenID Token Failed Validation");
                         }
                     } else
                     {

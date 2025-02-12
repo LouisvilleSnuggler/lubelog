@@ -3,6 +3,7 @@ using CarCareTracker.Helper;
 using CarCareTracker.Models;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,7 @@ namespace CarCareTracker.Logic
         OperationResponse ResetUserPassword(LoginModel credentials);
         OperationResponse SendRegistrationToken(LoginModel credentials);
         UserData ValidateUserCredentials(LoginModel credentials);
+        JWTValidateResult ValidateOAuthToken(string jwtToken);
         UserData ValidateOpenIDUser(LoginModel credentials);
         bool CheckIfUserIsValid(int userId);
         bool CreateRootUserCredentials(LoginModel credentials);
@@ -38,18 +40,20 @@ namespace CarCareTracker.Logic
         private readonly ITokenRecordDataAccess _tokenData;
         private readonly IMailHelper _mailHelper;
         private readonly IConfigHelper _configHelper;
+        private readonly ILogger<LoginLogic> _logger;
         private IMemoryCache _cache;
         public LoginLogic(IUserRecordDataAccess userData, 
             ITokenRecordDataAccess tokenData, 
             IMailHelper mailHelper,
             IConfigHelper configHelper,
-            IMemoryCache memoryCache)
+            IMemoryCache memoryCache, ILogger<LoginLogic> logger)
         {
             _userData = userData;
             _tokenData = tokenData;
             _mailHelper = mailHelper;
             _configHelper = configHelper;
             _cache = memoryCache;
+            _logger = logger;
         }
         public bool CheckIfUserIsValid(int userId)
         {
@@ -272,6 +276,39 @@ namespace CarCareTracker.Logic
                     return new UserData();
                 }
             }
+        }
+        public JWTValidateResult ValidateOAuthToken(string jwtToken)
+        {
+            var jwtResult = new JWTValidateResult();
+            var tokenParser = new JwtSecurityTokenHandler();
+            var openIdConfig = _configHelper.GetOpenIDConfig();
+            try
+            {
+                var parsedToken = tokenParser.ReadJwtToken(jwtToken);
+                //Validate Token
+                var expiration = long.Parse(parsedToken.Claims.First(x => x.Type == "exp").Value);
+                var audience = parsedToken.Claims.First(x => x.Type == "aud").Value;
+                if (audience != openIdConfig.ClientId)
+                {
+                    _logger.LogError($"Error Validating JWT Token: mismatch audience, expecting {openIdConfig.ClientId} but received {audience}");
+                    jwtResult.Success = false;
+                    return jwtResult;
+                }
+                if (expiration < StaticHelper.GetEpochFromDateTimeSeconds(DateTime.Now))
+                {
+                    _logger.LogError($"Error Validating JWT Token: expired token");
+                    jwtResult.Success = false;
+                    return jwtResult;
+                }
+                var userEmailAddress = parsedToken.Claims.First(x => x.Type == "email").Value;
+                jwtResult.EmailAddress = userEmailAddress;
+                jwtResult.Success = true;
+            } catch (Exception ex)
+            {
+                _logger.LogError($"Error Validating JWT Token: {ex.Message}");
+                jwtResult.Success = false;
+            }
+            return jwtResult;
         }
         public UserData ValidateOpenIDUser(LoginModel credentials)
         {

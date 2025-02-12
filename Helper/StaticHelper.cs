@@ -303,6 +303,10 @@ namespace CarCareTracker.Helper
         {
             return new DateTimeOffset(date).ToUnixTimeMilliseconds();
         }
+        public static long GetEpochFromDateTimeSeconds(DateTime date)
+        {
+            return new DateTimeOffset(date).ToUnixTimeSeconds();
+        }
         public static void InitMessage(IConfiguration config)
         {
             Console.WriteLine($"LubeLogger {VersionNumber}");
